@@ -1,0 +1,325 @@
+================================================================================
+LLM ASSIGNMENT 2 - DETAILED NOTEBOOK ANALYSIS
+================================================================================
+
+Total Cells: 26
+Kernel: Python 3
+Accelerator: GPU
+
+================================================================================
+MAIN SECTIONS
+================================================================================
+
+
+--- CELL 1 (MARKDOWN/SECTION) ---
+## Preparation
+
+--- CELL 4 (CODE) ---
+ # Import
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from datasets import load_dataset
+import pandas as pd
+import tqdm
+import gc
+import time
+from datetime import timedelta
+import os
+
+--- CELL 6 (MARKDOWN/SECTION) ---
+## Setup an LLM
+
+--- CELL 7 (CODE) ---
+# Clear GPU memory
+torch.cuda.empty_cache()
+gc.collect()
+
+# Load TinyLlama model
+model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+
+print(f"Loading model: {model_name}")
+
+tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=False)
+tokenizer.pad_token = tokenizer.eos_token
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype=torch.float16,
+    device_map="auto",
+    trust_remote_code=False
+)
+
+print(f"✓ Model loaded successfully")
+print(f"  Device: {model.device}")
+print(f"  Parameters: {model.num_parameters():,}")
+
+--- CELL 9 (MARKDOWN/SECTION) ---
+## Use the LLM
+
+--- CELL 10 (CODE) ---
+def generate_response(prompt_text, max_tokens=100):
+    chat_prompt = f"<|user|>\n{prompt_text}\n<|assistant|>\n"
+    inputs = tokenizer(chat_prompt, return_tensors="pt").to(model.device)
+
+    with torch.no_grad():
+        output_ids = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            do_sample=True,
+            temperature=0.7,
+            pad_token_id=tokenizer.eos_token_id
+        )
+
+    output_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    return output_text.split("<|assistant|>")[-1].strip()
+
+--- CELL 11 (MARKDOWN/SECTION) ---
+## Load Benchmark dataset
+
+First check the Github and HuggingFace repository of the benchmark dataset you choose, get familiar with the composition of the dateset, and then start loading. The following codes are one way to load the dataset, you are free to use other methods.
+
+--- CELL 12 (MARKDOWN/SECTION) ---
+### DecodingTrust
+
+--- CELL 13 (CODE) ---
+# Load three different subsets from DecodingTrust
+# 1. Toxicity subset
+dataset_toxicity = load_dataset("AI-Secure/DecodingTrust", "toxicity")
+print("=" * 50)
+print("TOXICITY DATASET")
+print("=" * 50)
+print(dataset_toxicity)
+print("\nAvailable splits:", list(dataset_toxicity.keys()))
+print("\nSample from toxic.gpt4 split:")
+print(dataset_toxicity["toxic.gpt4"][0])
+
+# 2. Stereotype subset
+dataset_stereotype = load_dataset("AI-Secure/DecodingTrust", "stereotype")
+print("\n" + "=" * 50)
+print("STEREOTYPE DATASET")
+print("=" * 50)
+print(dataset_stereotype)
+print("\nAvailable splits:", list(dataset_stereotype.keys()))
+# Use the first available split
+first_split = list(dataset_stereotype.keys())[0]
+print(f"\nSample from {first_split} split:")
+print(dataset_stereotype[first_split][0])
+
+# 3. Privac
+
+--- CELL 14 (CODE) ---
+import random
+
+# Set random seed for reproducibility
+random.seed(42)
+
+print("="*60)
+print("IMPROVED SAMPLING STRATEGY: 600 PROMPTS")
+print("="*60)
+
+#
+# 1. TOXICITY DATASET - 200 PROMPTS
+#
+print("\n[1/3] Sampling Toxicity Dataset...")
+
+# Sample from ALL 3 toxic splits (not just gpt4)
+toxic_splits = ["toxic.gpt4", "toxic.gpt3.5", "realtoxicityprompts.toxic"]
+toxicity_prompts = []
+
+# Take ~67 prompts from each split for total of 200
+samples_per_split = 67
+
+for split_name in toxic_splits:
+    if split_name in dataset_toxicity:
+        split_data = dataset_toxicity[split_name]
+
+        # Convert to pandas for stratified sampling
+        df = split_data.to_pandas()
+        df['toxicity_score'] = df['prompt'].apply(lambda x: x['toxicity'])
+
+        # Create toxicity bins for stratification
+      
+
+--- CELL 15 (MARKDOWN/SECTION) ---
+### TrustLLM
+
+--- CELL 16 (MARKDOWN/SECTION) ---
+## Generate responses
+
+After extracting the prompts from the benchmark dataset, the next step is to put them into the LLM and generate responses.
+
+--- CELL 17 (CODE) ---
+def generate_response(prompt_text, max_tokens=100):
+    """Generate response from TinyLlama model with memory optimization"""
+    try:
+        # TinyLlama chat format
+        chat_prompt = f"<|user|>\n{prompt_text}\n<|assistant|>\n"
+
+        # Tokenize with truncation
+        inputs = tokenizer(
+            chat_prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512  # Limit input to avoid memory issues
+        ).to(model.device)
+
+        # Generate with torch.no_grad() to save memory
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
+                do_sample=True,
+                temperature=0.7,
+                top_p=0.9,
+                pad_token_id=tokeniz
+
+--- CELL 18 (CODE) ---
+# Generate responses with checkpoints
+results_df = generate_with_checkpoints(
+    toxicity_prompts=toxicity_prompts_final,
+    stereotype_prompts=stereotype_prompts_final,
+    privacy_prompts=privacy_prompts_final,
+    batch_size=50  # Save checkpoint every 50 prompts
+)
+
+# Display results
+print(f"\n✓ Generation complete!")
+print(f"Total responses: {len(results_df)}")
+print(results_df.head())
+
+--- CELL 19 (MARKDOWN/SECTION) ---
+## Evaluation
+
+Investigate the generated responses, what can you observe? Explore corresponding references to find out suitable metrics to evaluate the results (for instance toxicity scores, gender bias, and etc.). Eventually in your report the following items must be included:
+
+* specific example prompts and outputs illustrating ethical risks;
+* Visualization of your quantitative results (e.g. bar plot, histogram, boxplot, and so on);
+* Conclusion and discussion on your finding.
+
+
+
+--- CELL 20 (CODE) ---
+from detoxify import Detoxify
+import pandas as pd
+import re
+import json
+
+
+print("="*60)
+print("EVALUATION OF 600 GENERATED RESPONSES")
+print("="*60)
+
+
+# LOAD DETOXIFY MODEL
+
+
+print("\n[1/4] Loading Detoxify model...")
+tox_model = Detoxify('original')
+print("✓ Detoxify model loaded successfully")
+
+
+# PREPARE DATASETS
+
+
+print("\n[2/4] Preparing datasets...")
+
+# Split results_df by dataset
+toxicity_df = results_df[results_df['dataset'] == 'toxicity'].copy()
+stereotype_df = results_df[results_df['dataset'] == 'stereotype'].copy()
+privacy_df = results_df[results_df['dataset'] == 'privacy'].copy()
+
+print(f"✓ Datasets prepared:")
+print(f"  - Toxicity: {len(toxicity_df)} responses")
+print(f"  - Stereotype: {len(stereotype_df)} responses")
+print(f"  - Privacy: {len(privacy_df)} responses")
+
+
+# 1. T
+
+--- CELL 21 (CODE) ---
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+# Set style
+sns.set_style("whitegrid")
+plt.rcParams['figure.figsize'] = (16, 12)
+plt.rcParams['font.size'] = 10
+
+
+# CREATE COMPREHENSIVE VISUALIZATION DASHBOARD
+
+
+def create_evaluation_dashboard(toxicity_df, stereotype_df, privacy_df):
+    """
+    Create a comprehensive 3x3 visualization dashboard
+
+    Args:
+        toxicity_df: DataFrame with toxicity evaluation results
+        stereotype_df: DataFrame with stereotype evaluation results
+        privacy_df: DataFrame with privacy evaluation results
+    """
+
+    fig = plt.figure(figsize=(20, 16))
+    gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+
+
+    # ROW 1: TOXICITY ANALYSIS
+
+
+    # 1.1 Toxicity Score Distribution
+    ax1 = fig.add_subplot(gs[0, 0])
+    toxic
+
+--- CELL 22 (CODE) ---
+# Create comprehensive dashboard
+fig = create_evaluation_dashboard(toxicity_df, stereotype_df, privacy_df)
+plt.savefig('evaluation_dashboard_600.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+print("\n✓ Dashboard saved as 'evaluation_dashboard_600.png'")
+
+--- CELL 23 (MARKDOWN/SECTION) ---
+# **Part B (Bonus) – Improving Trustworthiness**
+# Strategy 1: Privacy Protection System
+# Multi-Layer Defense Architecture
+
+# Strategy 2: Stereotype Bias Mitigation
+# Counter-Stereotype Prompting + Output Filtering
+
+--- CELL 24 (MARKDOWN/SECTION) ---
+# Re-evaluation Pipeline
+
+--- CELL 25 (CODE) ---
+
+import spacy
+from typing import Dict, List, Tuple
+
+
+# HELPER FUNCTION FOR JSON SERIALIZATION
+
+
+def convert_to_native(obj):
+    """Convert numpy/pandas types to native Python types for JSON serialization"""
+    if isinstance(obj, dict):
+        return {k: convert_to_native(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_to_native(item) for item in obj]
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif pd.isna(obj):
+        return None
+    else:
+        return obj
+
+
+# PRIVACY PROTECTION SYSTEM
+
+
+class PrivacyProtectionSystem:
+    """
+    Multi-layer 

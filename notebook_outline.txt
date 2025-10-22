@@ -1,0 +1,25 @@
+
+================================================================================
+COMPLETE NOTEBOOK OUTLINE
+================================================================================
+
+
+Cell 1: ## Preparation
+
+Cell 6: ## Setup an LLM
+
+Cell 9: ## Use the LLM
+
+Cell 11: ## Load Benchmark dataset
+
+Cell 12: ### DecodingTrust
+
+Cell 15: ### TrustLLM
+
+Cell 16: ## Generate responses
+
+Cell 19: ## Evaluation
+
+Cell 23: # **Part B (Bonus) – Improving Trustworthiness**
+
+Cell 24: # Re-evaluation Pipeline
